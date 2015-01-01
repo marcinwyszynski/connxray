@@ -33,11 +33,25 @@ type Listener struct {
 	// ([]byte) and return values (int and error) as arguments.
 	ConnReadCallback func(net.Conn, []byte, int, error)
 
+	// ConnReadFromCallback applies to a net.PacketConn object created by
+	//the underlying net Listener's 'Accept' call. It is called every time
+	// the underlying net.PacketConn's 'ReadFrom' method is called, with its
+	// argument ([]byte) and return values (int, net.Addr and error) as
+	// arguments.
+	ConnReadFromCallback func(net.Conn, []byte, int, net.Addr, error)
+
 	// ConnWriteCallback applies to a net.Conn object created by the
 	// underlying net Listener's 'Accept' call. It is called every time the
 	// underlying net.Conn's 'Write' method is called, with its argument
 	// ([]byte) and return values (int and error) as arguments.
 	ConnWriteCallback func(net.Conn, []byte, int, error)
+
+	// ConnWriteToCallback applies to a net.Conn object created by the
+	// underlying net Listener's 'Accept' call. It is called every time the
+	// underlying net.PacketConn's 'WriteTo' method is called, with its
+	// arguments ([]byte and net.Addr) and return values (int and error) as
+	// arguments.
+	ConnWriteToCallback func(net.Conn, []byte, net.Addr, int, error)
 
 	// ConnCloseCallback applies to a net.Conn object created by the
 	// underlying net Listener's 'Accept' call. It is called every time the
@@ -83,7 +97,9 @@ func (l *Listener) Accept() (net.Conn, error) {
 	conn := &Conn{
 		NetConn:                  netconn,
 		ReadCallback:             l.ConnReadCallback,
+		ReadFromCallback:         l.ConnReadFromCallback,
 		WriteCallback:            l.ConnWriteCallback,
+		WriteToCallback:          l.ConnWriteToCallback,
 		CloseCallback:            l.ConnCloseCallback,
 		LocalAddrCallback:        l.ConnLocalAddrCallback,
 		RemoteAddrCallback:       l.ConnRemoteAddrCallback,

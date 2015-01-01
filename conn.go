@@ -9,11 +9,21 @@
 // connection lifetime. This means that only certain net.Conn objects can be
 // explicitly monitored (eg. sampling) or that monitoring behavior can be
 // adjusted on the fly.
+//
+// Last but not least connxray.Conn implements net.PacketConn so can be used
+// with any code that expects one (eg. golang.org/x/net/ipv[46]).
 package connxray
 
 import (
+	"fmt"
 	"net"
 	"time"
+)
+
+var (
+	// ErrNotPacketConn signifies that the underlying net.Conn is does not
+	// implement the net.PacketConn interface.
+	ErrNotPacketConn = fmt.Errorf("this net.Conn is not a net.PacketConn")
 )
 
 // Conn wraps a net.Conn and presents the same interface while allowing
@@ -29,10 +39,20 @@ type Conn struct {
 	// and error) as arguments.
 	ReadCallback func(net.Conn, []byte, int, error)
 
+	// ReadFromCallback is called every time the underlying net.PacketConn's
+	// 'ReadFrom' method is called, with its argument ([]byte) and return
+	// values (int, net.Addr and error) as arguments.
+	ReadFromCallback func(net.Conn, []byte, int, net.Addr, error)
+
 	// WriteCallback is called every time the underlying net.Conn's 'Write'
 	// method is called, with its argument ([]byte) and return values (int
 	// and error) as arguments.
 	WriteCallback func(net.Conn, []byte, int, error)
+
+	// WriteToCallback is called every time the underlying net.PacketConn's
+	// 'WriteTo' method is called, with its arguments ([]byte and net.Addr)
+	// and return values (int and error) as arguments.
+	WriteToCallback func(net.Conn, []byte, net.Addr, int, error)
 
 	// CloseCallback is called every time the underlying net.Conn's 'Close'
 	// method is called, with its its return value (error) as an argument.
@@ -74,12 +94,42 @@ func (c *Conn) Read(b []byte) (int, error) {
 	return n, err
 }
 
+// ReadFrom reads from the underlying net.PacketConn and runs a ReadFromCallback
+// if one was specified.
+func (c *Conn) ReadFrom(b []byte) (n int, addr net.Addr, err error) {
+	pconn, implements := c.NetConn.(net.PacketConn)
+	if !implements {
+		err = ErrNotPacketConn
+	} else {
+		n, addr, err = pconn.ReadFrom(b)
+	}
+	if c.ReadFromCallback != nil {
+		defer c.ReadFromCallback(c.NetConn, b, n, addr, err)
+	}
+	return n, addr, err
+}
+
 // Write writes to the underlying net.Conn and runs a WriteCallback if one was
 // specified.
 func (c *Conn) Write(b []byte) (int, error) {
 	n, err := c.NetConn.Write(b)
 	if c.WriteCallback != nil {
 		defer c.WriteCallback(c.NetConn, b, n, err)
+	}
+	return n, err
+}
+
+// ReadFrom reads from the underlying net.PacketConn and runs a ReadFromCallback
+// if one was specified.
+func (c *Conn) WriteTo(b []byte, addr net.Addr) (n int, err error) {
+	pconn, implements := c.NetConn.(net.PacketConn)
+	if !implements {
+		err = ErrNotPacketConn
+	} else {
+		n, err = pconn.WriteTo(b, addr)
+	}
+	if c.WriteToCallback != nil {
+		defer c.WriteToCallback(c.NetConn, b, addr, n, err)
 	}
 	return n, err
 }
