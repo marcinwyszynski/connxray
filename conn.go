@@ -64,6 +64,8 @@ type Conn struct {
 	SetWriteDeadlineCallback func(net.Conn, time.Time, error)
 }
 
+// Read reads from the underlying net.Conn and runs a ReadCallback if one was
+// specified.
 func (c *Conn) Read(b []byte) (int, error) {
 	n, err := c.NetConn.Read(b)
 	if c.ReadCallback != nil {
@@ -72,6 +74,8 @@ func (c *Conn) Read(b []byte) (int, error) {
 	return n, err
 }
 
+// Write writes to the underlying net.Conn and runs a WriteCallback if one was
+// specified.
 func (c *Conn) Write(b []byte) (int, error) {
 	n, err := c.NetConn.Write(b)
 	if c.WriteCallback != nil {
@@ -80,6 +84,8 @@ func (c *Conn) Write(b []byte) (int, error) {
 	return n, err
 }
 
+// Close closes the underlying net.Conn and runs a CloseCallback if one was
+// specified.
 func (c *Conn) Close() error {
 	err := c.NetConn.Close()
 	if c.CloseCallback != nil {
@@ -88,6 +94,8 @@ func (c *Conn) Close() error {
 	return err
 }
 
+// LocalAddr gets the local address from the underlying net.Conn and runs a
+// LocalAddrCallback if one was specified.
 func (c *Conn) LocalAddr() net.Addr {
 	addr := c.NetConn.LocalAddr()
 	if c.LocalAddrCallback != nil {
@@ -96,6 +104,8 @@ func (c *Conn) LocalAddr() net.Addr {
 	return addr
 }
 
+// RemoteAddr gets the remote address from the underlying net.Conn and runs a
+// RemoteAddrCallback if one was specified.
 func (c *Conn) RemoteAddr() net.Addr {
 	addr := c.NetConn.RemoteAddr()
 	if c.RemoteAddrCallback != nil {
@@ -104,6 +114,8 @@ func (c *Conn) RemoteAddr() net.Addr {
 	return addr
 }
 
+// SetDeadline sets a deadline on the underlying net.Conn and runs a
+// SetDeadlineCallback if one was specified.
 func (c *Conn) SetDeadline(t time.Time) error {
 	err := c.NetConn.SetDeadline(t)
 	if c.SetDeadlineCallback != nil {
@@ -112,14 +124,18 @@ func (c *Conn) SetDeadline(t time.Time) error {
 	return err
 }
 
+// SetReadDeadline sets a read deadline on the underlying net.Conn and runs a
+// SetReadDeadlineCallback if one was specified.
 func (c *Conn) SetReadDeadline(t time.Time) error {
 	err := c.NetConn.SetReadDeadline(t)
 	if c.SetReadDeadlineCallback != nil {
-		defer c.SetDeadlineCallback(c.NetConn, t, err)
+		defer c.SetReadDeadlineCallback(c.NetConn, t, err)
 	}
 	return err
 }
 
+// SetWriteDeadline sets a write deadline on the underlying net.Conn and runs a
+// SetWriteDeadlineCallback if one was specified.
 func (c *Conn) SetWriteDeadline(t time.Time) error {
 	err := c.NetConn.SetWriteDeadline(t)
 	if c.SetWriteDeadlineCallback != nil {

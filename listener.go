@@ -76,6 +76,8 @@ type Listener struct {
 	ConnSetWriteDeadlineCallback func(net.Conn, time.Time, error)
 }
 
+// Accept runs Accept on the underlying net.Listener and runs an AcceptCallback
+// if one was specified.
 func (l *Listener) Accept() (net.Conn, error) {
 	netconn, err := l.NetListener.Accept()
 	conn := &Conn{
@@ -95,6 +97,8 @@ func (l *Listener) Accept() (net.Conn, error) {
 	return conn, err
 }
 
+// Close closes the underlying net.Listener and runs a CloseCallback if one was
+// specified.
 func (l *Listener) Close() error {
 	err := l.NetListener.Close()
 	if l.CloseCallback != nil {
@@ -103,6 +107,8 @@ func (l *Listener) Close() error {
 	return err
 }
 
+// Addr gets the address of the underlying net.Listener and runs an AddrCallback
+// if one was specified.
 func (l *Listener) Addr() net.Addr {
 	addr := l.NetListener.Addr()
 	if l.AddrCallback != nil {
