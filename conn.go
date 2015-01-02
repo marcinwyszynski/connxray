@@ -11,7 +11,10 @@
 // adjusted on the fly.
 //
 // Last but not least connxray.Conn implements net.PacketConn so can be used
-// with any code that expects one (eg. golang.org/x/net/ipv[46]).
+// with any code that expects one (eg. golang.org/x/net/ipv[46]). If the
+// underlying connection object does not implement net.PacketConn a releant
+// error (ErrNotPacketConn) will be returned by ReadFrom and WriteTo methodes
+// as well as passed to their respective callbacks, if any were specified.
 package connxray
 
 import (
@@ -119,7 +122,7 @@ func (c *Conn) Write(b []byte) (int, error) {
 	return n, err
 }
 
-// ReadFrom reads from the underlying net.PacketConn and runs a ReadFromCallback
+// WriteTo writes to the underlying net.PacketConn and runs a WriteToCallback
 // if one was specified.
 func (c *Conn) WriteTo(b []byte, addr net.Addr) (n int, err error) {
 	pconn, implements := c.NetConn.(net.PacketConn)
