@@ -28,11 +28,6 @@ type Listener struct {
 
 	// AfterAddr is an 'after' hook for the Addr method.
 	AfterAddr func(*Listener, net.Addr)
-
-	// OnConn is called on for every Conn created by this Listener using the
-	// Accpet method. It takes a new Conn and provides an opportunity to set
-	// up relevant hooks for it.
-	OnConn func(c *Conn)
 }
 
 // Accept runs Accept on the underlying net.Listener plus any relevant hooks
@@ -45,9 +40,6 @@ func (l *Listener) Accept() (net.Conn, error) {
 	}
 	netconn, err := l.Base.Accept()
 	conn := &Conn{Base: netconn}
-	if l.OnConn != nil {
-		l.OnConn(conn)
-	}
 	if l.AfterAccept != nil {
 		defer l.AfterAccept(l, conn, err)
 	}
