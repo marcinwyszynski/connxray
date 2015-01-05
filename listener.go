@@ -2,133 +2,79 @@ package connxray
 
 import (
 	"net"
-	"time"
 )
 
 // Listener wraps a net.Listener and presents the same interface while allowing
-// callback functions to be injected that will be called as the underlying
-// net.Listener calls are invoked - with both their arguments and return values
-// as callback arguments. Callbacks can also be specified that are passed to
-// connections created by 'Accept' calls. All callbacks are void functions.
+// hook functions to be injected that will be called before and/or after
+// the underlying net.Listener calls are invoked. Please see the package
+// top-level documentation for more information about hooks.
 type Listener struct {
 	// Underlying net.Listener.
-	NetListener net.Listener
+	Base net.Listener
 
-	// AcceptCallback is called every time underlying net.Listener's
-	// 'Accept' method is called, with a Conn (wrapping the returned
-	// net.Conn) and an error as arguments.
-	AcceptCallback func(net.Listener, *Conn, error)
+	// BeforeAccept is a 'before' hook for the Accept method. If it returns
+	// an error neither the base method nor the 'after' callback will be
+	// called.
+	BeforeAccept func(*Listener) error
 
-	// CloseCallback is called every time underlying net.Listener's 'Close'
-	// method is called, with its return value (error) as argument.
-	CloseCallback func(net.Listener, error)
+	// AfterAccept is an 'after' hook for the Accept method.
+	AfterAccept func(*Listener, *Conn, error)
 
-	// AddrCallback is called every time underlying net.Listener's 'Addr'
-	// method is called, with its return value (error) as argument.
-	AddrCallback func(net.Listener, net.Addr)
+	// BeforeClose is a 'before' hook for the Close method.
+	BeforeClose func(*Listener) error
 
-	// ConnReadCallback applies to a net.Conn object created by the
-	// underlying net Listener's 'Accept' call. It is called every time the
-	// underlying net.Conn's 'Read' method is called, with its argument
-	// ([]byte) and return values (int and error) as arguments.
-	ConnReadCallback func(net.Conn, []byte, int, error)
+	// AfterClose is an 'after' hook for the Close method.
+	AfterClose func(*Listener, error)
 
-	// ConnReadFromCallback applies to a net.PacketConn object created by
-	//the underlying net Listener's 'Accept' call. It is called every time
-	// the underlying net.PacketConn's 'ReadFrom' method is called, with its
-	// argument ([]byte) and return values (int, net.Addr and error) as
-	// arguments.
-	ConnReadFromCallback func(net.Conn, []byte, int, net.Addr, error)
+	// AfterAddr is an 'after' hook for the Addr method.
+	AfterAddr func(*Listener, net.Addr)
 
-	// ConnWriteCallback applies to a net.Conn object created by the
-	// underlying net Listener's 'Accept' call. It is called every time the
-	// underlying net.Conn's 'Write' method is called, with its argument
-	// ([]byte) and return values (int and error) as arguments.
-	ConnWriteCallback func(net.Conn, []byte, int, error)
-
-	// ConnWriteToCallback applies to a net.Conn object created by the
-	// underlying net Listener's 'Accept' call. It is called every time the
-	// underlying net.PacketConn's 'WriteTo' method is called, with its
-	// arguments ([]byte and net.Addr) and return values (int and error) as
-	// arguments.
-	ConnWriteToCallback func(net.Conn, []byte, net.Addr, int, error)
-
-	// ConnCloseCallback applies to a net.Conn object created by the
-	// underlying net Listener's 'Accept' call. It is called every time the
-	// underlying net.Conn's 'Close' method is called, with its its return
-	// value (error) as an argument.
-	ConnCloseCallback func(net.Conn, error)
-
-	// ConnLocalAddrCallback applies to a net.Conn object created by the
-	// underlying net Listener's 'Accept' call. It is called every time the
-	// underlying net.Conn's 'LocalAddr' method is called, with its its
-	// return value (net.Addr) as an argument.
-	ConnLocalAddrCallback func(net.Conn, net.Addr)
-
-	// ConnRemoteAddrCallback applies to a net.Conn object created by the
-	// underlying net Listener's 'Accept' call. It is called every time the
-	// underlying net.Conn's 'RemoteAddr' method is called, with its its
-	// return value (net.Addr) as an argument.
-	ConnRemoteAddrCallback func(net.Conn, net.Addr)
-
-	// ConnRemoteAddrCallback applies to a net.Conn object created by the
-	// underlying net Listener's 'Accept' call. It is called every time
-	// underlying net.Conn's 'SetDeadline' method is called, with its
-	// argument (time.Time) and return value (error) as arguments.
-	ConnSetDeadlineCallback func(net.Conn, time.Time, error)
-
-	// ConnSetReadDeadlineCallback applies to a net.Conn object created by
-	// the underlying net Listener's 'Accept' call. It is called every time
-	// underlying net.Conn's 'SetReadDeadline' method is called, with its
-	// argument (time.Time) and return value (error) as arguments.
-	ConnSetReadDeadlineCallback func(net.Conn, time.Time, error)
-
-	// ConnSetWriteDeadlineCallback applies to a net.Conn object created by
-	// the underlying net Listener's 'Accept' call. It is called every time
-	// underlying net.Conn's 'SetWriteDeadline' method is called, with its
-	// argument (time.Time) and return value (error) as arguments.
-	ConnSetWriteDeadlineCallback func(net.Conn, time.Time, error)
+	// OnConn is called on for every Conn created by this Listener using the
+	// Accpet method. It takes a new Conn and provides an opportunity to set
+	// up relevant hooks for it.
+	OnConn func(c *Conn)
 }
 
-// Accept runs Accept on the underlying net.Listener and runs an AcceptCallback
-// if one was specified.
+// Accept runs Accept on the underlying net.Listener plus any relevant hooks
+// ('before' and 'after') that were set up.
 func (l *Listener) Accept() (net.Conn, error) {
-	netconn, err := l.NetListener.Accept()
-	conn := &Conn{
-		NetConn:                  netconn,
-		ReadCallback:             l.ConnReadCallback,
-		ReadFromCallback:         l.ConnReadFromCallback,
-		WriteCallback:            l.ConnWriteCallback,
-		WriteToCallback:          l.ConnWriteToCallback,
-		CloseCallback:            l.ConnCloseCallback,
-		LocalAddrCallback:        l.ConnLocalAddrCallback,
-		RemoteAddrCallback:       l.ConnRemoteAddrCallback,
-		SetDeadlineCallback:      l.ConnSetDeadlineCallback,
-		SetReadDeadlineCallback:  l.ConnSetReadDeadlineCallback,
-		SetWriteDeadlineCallback: l.ConnSetWriteDeadlineCallback,
+	if l.BeforeAccept != nil {
+		if err := l.BeforeAccept(l); err != nil {
+			return nil, err
+		}
 	}
-	if l.AcceptCallback != nil {
-		defer l.AcceptCallback(l.NetListener, conn, err)
+	netconn, err := l.Base.Accept()
+	conn := &Conn{Base: netconn}
+	if l.OnConn != nil {
+		l.OnConn(conn)
+	}
+	if l.AfterAccept != nil {
+		defer l.AfterAccept(l, conn, err)
 	}
 	return conn, err
 }
 
-// Close closes the underlying net.Listener and runs a CloseCallback if one was
-// specified.
+// Close runs Close on the underlying net.Listener plus any relevant hooks
+// ('before' and 'after') that were set up.
 func (l *Listener) Close() error {
-	err := l.NetListener.Close()
-	if l.CloseCallback != nil {
-		defer l.CloseCallback(l.NetListener, err)
+	if l.BeforeClose != nil {
+		if err := l.BeforeClose(l); err != nil {
+			return err
+		}
+	}
+	err := l.Base.Close()
+	if l.AfterClose != nil {
+		defer l.AfterClose(l, err)
 	}
 	return err
 }
 
-// Addr gets the address of the underlying net.Listener and runs an AddrCallback
-// if one was specified.
+// Addr runs Addr on the underlying net.Listener plus an 'after' hook if it
+// was set up.
 func (l *Listener) Addr() net.Addr {
-	addr := l.NetListener.Addr()
-	if l.AddrCallback != nil {
-		defer l.AddrCallback(l.NetListener, addr)
+	addr := l.Base.Addr()
+	if l.AfterAddr != nil {
+		defer l.AfterAddr(l, addr)
 	}
 	return addr
 }
