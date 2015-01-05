@@ -41,7 +41,10 @@ func newTracker() *statsTracker {
 	return &statsTracker{data: make(map[net.Conn]*stats)}
 }
 
-func (s *statsTracker) onAccept(_ net.Listener, conn *xray.Conn, err error) {
+func (s *statsTracker) onAccept(_ *xray.Listener, conn *xray.Conn, err error) {
+	conn.AfterRead = s.onRead
+	conn.AfterWrite = s.onWrite
+	conn.AfterClose = s.onClose
 	if err != nil {
 		glog.Errorf("Error establishing connection: %v", err)
 		return
@@ -49,14 +52,18 @@ func (s *statsTracker) onAccept(_ net.Listener, conn *xray.Conn, err error) {
 	glog.Infof("%s <-> %s started", conn.LocalAddr(), conn.RemoteAddr())
 	s.dataGuard.Lock()
 	defer s.dataGuard.Unlock()
-	s.data[conn.NetConn] = newStats()
+	s.data[conn.Base] = newStats()
 }
 
-func (s *statsTracker) onRead(conn net.Conn, _ []byte, n int, err error) {
+func (s *statsTracker) onRead(conn *xray.Conn, _ []byte, n int, err error) {
 	if err != nil {
-		glog.Errorf("Error reading from connection %#v %v", conn, err)
+		glog.Errorf(
+			"Error reading from connection with %s: %v",
+			conn.RemoteAddr(),
+			err,
+		)
 	}
-	data, exists := s.data[conn]
+	data, exists := s.data[conn.Base]
 	if !exists {
 		glog.Errorf("Connection not tracked: %#v", conn)
 		return
@@ -66,11 +73,15 @@ func (s *statsTracker) onRead(conn net.Conn, _ []byte, n int, err error) {
 	data.bytesRead += n
 }
 
-func (s *statsTracker) onWrite(conn net.Conn, _ []byte, n int, err error) {
+func (s *statsTracker) onWrite(conn *xray.Conn, _ []byte, n int, err error) {
 	if err != nil {
-		glog.Errorf("Error writing to connection %#v %v", conn, err)
+		glog.Errorf(
+			"Error writing to connection with %s: %v",
+			conn.RemoteAddr(),
+			err,
+		)
 	}
-	data, exists := s.data[conn]
+	data, exists := s.data[conn.Base]
 	if !exists {
 		glog.Errorf("Connection not tracked: %#v", conn)
 		return
@@ -80,11 +91,15 @@ func (s *statsTracker) onWrite(conn net.Conn, _ []byte, n int, err error) {
 	data.bytesWritten += n
 }
 
-func (s *statsTracker) onClose(conn net.Conn, err error) {
+func (s *statsTracker) onClose(conn *xray.Conn, err error) {
 	if err != nil {
-		glog.Errorf("Error closing connection %#v %v", conn, err)
+		glog.Errorf(
+			"Error closing connection with %s: %v",
+			conn.RemoteAddr(),
+			err,
+		)
 	}
-	data, exists := s.data[conn]
+	data, exists := s.data[conn.Base]
 	if !exists {
 		glog.Errorf("Connection not tracked: %#v", conn)
 		return
@@ -111,11 +126,8 @@ func main() {
 	}
 	tracker := newTracker()
 	introspectedListener := &xray.Listener{
-		NetListener:       tcpLisetner,
-		AcceptCallback:    tracker.onAccept,
-		ConnReadCallback:  tracker.onRead,
-		ConnWriteCallback: tracker.onWrite,
-		ConnCloseCallback: tracker.onClose,
+		Base:        tcpLisetner,
+		AfterAccept: tracker.onAccept,
 	}
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "Hello world!")
