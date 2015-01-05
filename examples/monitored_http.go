@@ -8,9 +8,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/golang/glog"
@@ -21,100 +21,70 @@ var (
 	port = flag.Int("port", 1983, "HTTP port")
 )
 
+type ReadCallback func(*xray.Conn, []byte, int, error)
+type WriteCallback func(*xray.Conn, []byte, int, error)
+type CloseCallback func(*xray.Conn, error)
+
 type stats struct {
 	bytesRead    int
 	bytesWritten int
 	startTime    time.Time
-	guard        sync.Mutex
 }
 
-func newStats() *stats {
-	return &stats{startTime: time.Now()}
-}
-
-type statsTracker struct {
-	data      map[net.Conn]*stats
-	dataGuard sync.Mutex
-}
-
-func newTracker() *statsTracker {
-	return &statsTracker{data: make(map[net.Conn]*stats)}
-}
-
-func (s *statsTracker) onAccept(_ *xray.Listener, conn *xray.Conn, err error) {
-	conn.AfterRead = s.onRead
-	conn.AfterWrite = s.onWrite
-	conn.AfterClose = s.onClose
+func onAccept(_ *xray.Listener, conn *xray.Conn, err error) {
+	s := &stats{startTime: time.Now()}
+	conn.AfterRead = onRead(s)
+	conn.AfterWrite = onWrite(s)
+	conn.AfterClose = onClose(s)
 	if err != nil {
 		glog.Errorf("Error establishing connection: %v", err)
 		return
 	}
 	glog.Infof("%s <-> %s started", conn.LocalAddr(), conn.RemoteAddr())
-	s.dataGuard.Lock()
-	defer s.dataGuard.Unlock()
-	s.data[conn.Base] = newStats()
 }
 
-func (s *statsTracker) onRead(conn *xray.Conn, _ []byte, n int, err error) {
-	if err != nil {
-		glog.Errorf(
-			"Error reading from connection with %s: %v",
-			conn.RemoteAddr(),
-			err,
-		)
+func onRead(s *stats) ReadCallback {
+	return func(conn *xray.Conn, _ []byte, n int, err error) {
+		s.bytesRead += n
+		if err == nil {
+			return
+		}
+		if err == io.EOF {
+			msg := "Finished reading from connection with %s"
+			glog.Errorf(msg, conn.RemoteAddr())
+			return
+		}
+		msg := "Error reading from connection with %s: %v"
+		glog.Errorf(msg, conn.RemoteAddr(), err)
 	}
-	data, exists := s.data[conn.Base]
-	if !exists {
-		glog.Errorf("Connection not tracked: %#v", conn)
-		return
-	}
-	data.guard.Lock()
-	defer data.guard.Unlock()
-	data.bytesRead += n
 }
 
-func (s *statsTracker) onWrite(conn *xray.Conn, _ []byte, n int, err error) {
-	if err != nil {
-		glog.Errorf(
-			"Error writing to connection with %s: %v",
-			conn.RemoteAddr(),
-			err,
-		)
+func onWrite(s *stats) WriteCallback {
+	return func(conn *xray.Conn, _ []byte, n int, err error) {
+		s.bytesWritten += n
+		if err == nil {
+			return
+		}
+		msg := "Error writing to connection with %s: %v"
+		glog.Errorf(msg, conn.RemoteAddr(), err)
 	}
-	data, exists := s.data[conn.Base]
-	if !exists {
-		glog.Errorf("Connection not tracked: %#v", conn)
-		return
-	}
-	data.guard.Lock()
-	defer data.guard.Unlock()
-	data.bytesWritten += n
 }
 
-func (s *statsTracker) onClose(conn *xray.Conn, err error) {
-	if err != nil {
-		glog.Errorf(
-			"Error closing connection with %s: %v",
+func onClose(s *stats) CloseCallback {
+	return func(conn *xray.Conn, err error) {
+		if err != nil {
+			msg := "Error closing connection with %s: %v"
+			glog.Errorf(msg, conn.RemoteAddr(), err)
+		}
+		msg := "%s closed: %d bytes read, %d bytes written in %d ms"
+		glog.Infof(
+			msg,
 			conn.RemoteAddr(),
-			err,
+			s.bytesRead,
+			s.bytesWritten,
+			time.Since(s.startTime)/1e6,
 		)
 	}
-	data, exists := s.data[conn.Base]
-	if !exists {
-		glog.Errorf("Connection not tracked: %#v", conn)
-		return
-	}
-	glog.Infof(
-		"%s <-> %s closed: %d bytes read, %d bytes written in %d ms",
-		conn.LocalAddr(),
-		conn.RemoteAddr(),
-		data.bytesRead,
-		data.bytesWritten,
-		time.Since(data.startTime)/1e6,
-	)
-	data.guard.Lock()
-	defer data.guard.Unlock()
-	delete(s.data, conn)
 }
 
 func main() {
@@ -124,10 +94,9 @@ func main() {
 	if err != nil {
 		glog.Fatalf("Error creating a TCP listener: %v", err)
 	}
-	tracker := newTracker()
 	introspectedListener := &xray.Listener{
 		Base:        tcpLisetner,
-		AfterAccept: tracker.onAccept,
+		AfterAccept: onAccept,
 	}
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "Hello world!")
