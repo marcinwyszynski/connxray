@@ -8,7 +8,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"time"
@@ -44,38 +43,19 @@ func onAccept(_ *xray.Listener, conn *xray.Conn, err error) {
 }
 
 func onRead(s *stats) ReadCallback {
-	return func(conn *xray.Conn, _ []byte, n int, err error) {
+	return func(_ *xray.Conn, _ []byte, n int, _ error) {
 		s.bytesRead += n
-		if err == nil {
-			return
-		}
-		if err == io.EOF {
-			msg := "Finished reading from connection with %s"
-			glog.Errorf(msg, conn.RemoteAddr())
-			return
-		}
-		msg := "Error reading from connection with %s: %v"
-		glog.Errorf(msg, conn.RemoteAddr(), err)
 	}
 }
 
 func onWrite(s *stats) WriteCallback {
-	return func(conn *xray.Conn, _ []byte, n int, err error) {
+	return func(_ *xray.Conn, _ []byte, n int, _ error) {
 		s.bytesWritten += n
-		if err == nil {
-			return
-		}
-		msg := "Error writing to connection with %s: %v"
-		glog.Errorf(msg, conn.RemoteAddr(), err)
 	}
 }
 
 func onClose(s *stats) CloseCallback {
-	return func(conn *xray.Conn, err error) {
-		if err != nil {
-			msg := "Error closing connection with %s: %v"
-			glog.Errorf(msg, conn.RemoteAddr(), err)
-		}
+	return func(conn *xray.Conn, _ error) {
 		msg := "%s closed: %d bytes read, %d bytes written in %d ms"
 		glog.Infof(
 			msg,
